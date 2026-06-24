@@ -339,7 +339,7 @@ export async function querySingleAgent(
       \n* **Cooling Forces:** Evapotranspiration from plants (NDVI: ${physicsParams.ndvi}) provides evaporative cooling, which reduces surface heat by approx ${Math.round(Math.max(physicsParams.ndvi, 0) * 12.0 * 10) / 10}°C.`;
 
     default:
-      return `As the **${agent.name}** (${agent.role}), I have reviewed the telemetry. The current air temperature is ${physicsParams.airTemp}°C with ${physicsParams.relativeHumidity}% humidity, yielding a WBGT of ${wbgtRes.wbgt}°C (${wbgtRes.riskLevel} Risk). I am actively processing this data to compile localized mitigation, infrastructure loads, and security compliance files.`;
+      return `As the **${agent.name}** (${agent.role}), I have reviewed the telemetry. The current air temperature is ${physicsParams.airTemp}°C with ${physicsParams.relativeHumidity}% humidity, yielding a WBGT of ${wbgtRes.wbgt}°C (${wbgtRes.riskLevel} Risk). I am actively processing this data to compile localized mitigation and infrastructure recommendations.`;
   }
 }
 
@@ -356,29 +356,35 @@ export async function queryUniversalAI(
     city.baseParams.windSpeed
   );
 
+  const cleanQuery = query.trim().toLowerCase();
+
   if (geminiApiKey) {
     try {
-      const systemInstruction = `You are SafeSphere's Universal AI Climate Assistant. Your goals are:
-1. Help users understand how to use SafeSphere (explaining the interactive Leaflet map, thermodynamic parameters like albedo and NDVI, microclimate simulations, cooling shelters, and policies).
-2. Answer questions about climate science, urban heat islands (UHI), heat stress, public health, disaster preparedness, and resilience strategies.
-3. Provide ground-level recommendations tailored to the active city/location.
+      const systemInstruction = `You are SafeSphere's elite AI Urban Climate and Resilience Assistant. 
+You must respond to the user's query with 100% scientific precision, clarity, and usefulness. 
 
-Current Active Location Context:
+Active Location Context:
 - Name: ${city.name}, ${city.country}
-- Coords: ${city.coords.lat}, ${city.coords.lng}
-- Population: ${city.population}
-- Vulnerability Index: ${city.vulnerabilityIndex}/100
-- Weather Metrics: Air Temp ${city.baseParams.airTemp}°C, Relative Humidity ${city.baseParams.relativeHumidity}%, Wind Speed ${city.baseParams.windSpeed}m/s, Solar Radiation ${city.baseParams.solarRad}W/m²
-- Surface LST: ${lstRes.lst}°C (estimated)
-- WBGT: ${wbgtRes.wbgt}°C (${wbgtRes.riskLevel} Risk)
-- Local Wards/Morphology: Building Density ${city.baseParams.buildingDensity}%, Building Height ${city.baseParams.buildingHeight}m, Vegetation index (NDVI) ${city.baseParams.ndvi}, Surface Albedo ${city.baseParams.albedo}
+- Latitude: ${city.coords.lat}, Longitude: ${city.coords.lng}
+- Population: ${city.population.toLocaleString()} citizens
+- Heat Vulnerability Index: ${city.vulnerabilityIndex}/100 (Wards at risk)
+- Real Weather Metrics: Air Temp ${city.baseParams.airTemp}°C, Humidity ${city.baseParams.relativeHumidity}%, Wind Speed ${city.baseParams.windSpeed} m/s, Solar Radiation ${city.baseParams.solarRad} W/m²
+- Land Surface Temperature (LST): ${lstRes.lst}°C (95% Confidence: ${lstRes.confidenceInterval[0]}°C to ${lstRes.confidenceInterval[1]}°C)
+- Heat Stress Index (WBGT): ${wbgtRes.wbgt}°C (${wbgtRes.riskLevel} Risk level)
+- Urban Morphology: Building Density ${city.baseParams.buildingDensity}%, Avg Building Height ${city.baseParams.buildingHeight}m, Surface Albedo ${city.baseParams.albedo}, Vegetation Index (NDVI) ${city.baseParams.ndvi}
 
-Guidance on Application Usage:
-- Interactive Map: Users can view dynamic cooling shelters and real-time IoT sensors. They can toggle layers (Satellite vs Terrain view).
-- Citizen Portal: Citizens can find nearby cooling shelters, get first-aid steps for heatstroke, contact emergency services, or chat with you (the AI assistant).
-- Government Portal: Policy officers can run thermodynamic simulations of cooling interventions (planting trees, painting cool roofs, installing green roofs or water bodies) and view cost-benefit projections, carbon sequestration, and feasibility. They can also compile comprehensive multi-agent resilience reports.
+Emergency Shelter Database:
+${city.coolingShelters.map((s, idx) => `Shelter #${idx + 1}: ${s.name} at ${s.address} (Status: ${s.status}, Occupancy: ${s.occupied}/${s.capacity}, Distance: ${s.distanceMeters}m)`).join('\n')}
 
-Keep your tone professional, authoritative, scientifically grounded, and helpful. Always refer to the current city metrics where appropriate.`;
+Interactive Capabilities:
+1. Interactive Leaflet GIS Map: Displays real satellite/terrain views, cooling shelters, and live IoT sensor markers.
+2. Citizen Portal: Accesses emergency hotlines, shelter routes, and first aid tips.
+3. Government Portal: Policy sandbox allowing simulations of cool roofs (albedo $\\ge$ 0.75), canopy tree planting, green roofs, and water retention plazas. Recalculates LST, cost benefit, carbon capture, and feasibility scores. Generates full multi-agent reports.
+
+Response Guidelines:
+- Directly answer the user's question. If they ask about the app's features, guide them step-by-step.
+- Integrate the active city context (${city.name}) where appropriate to ground your answers in real metrics.
+- Keep the tone professional, authoritative, helpful, and scientific. Format using clear headers, bold texts, and bullet points. Do not write generic chat filler.`;
 
       const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiApiKey}`, {
         method: 'POST',
@@ -397,101 +403,117 @@ Keep your tone professional, authoritative, scientifically grounded, and helpful
         return data.candidates[0].content.parts[0].text;
       }
     } catch (e) {
-      console.error('Gemini API call failed in universal chatbot, falling back to semantic local router:', e);
+      console.error('Gemini API call failed, falling back to local router:', e);
     }
   }
 
   // Local semantic router fallback
-  const q = query.toLowerCase();
+  // Match specific intents with high precision:
 
-  // 1. App guidance
-  if (q.includes('use') || q.includes('how') || q.includes('map') || q.includes('simulation') || q.includes('portal') || q.includes('app') || q.includes('guide') || q.includes('slider') || q.includes('button') || q.includes('policy') || q.includes('report')) {
-    return `### SafeSphere Application Guide (Local AI Fallback)
-SafeSphere is an AI-powered urban resilience platform. Here is how you can use it:
-* **Interactive GIS Map:** Located on the main page, it shows your current active city. You can toggle between **Satellite View** (ideal for surface detail and building layouts) and **Terrain View** (great for typography and topography). Click on markers to see cooling shelter occupancy and sensor status.
-* **Citizen Portal:** Click the "Citizen Portal" link in the navigation to access public safety guidelines, view active heat wave advisories, locate the nearest shelter to coordinates, and interact with the emergency services dialer.
-* **Government Portal:** Under the "Government Portal" tab, city officials can simulate thermodynamic interventions:
-  * Adjust sliders to test planting trees, painting reflective cool roofs, or installing vegetated green roofs.
-  * Click **Run Thermodynamic Simulation** to recalculate the expected Land Surface Temperature reduction, carbon capture, and budget cost.
-  * Click **Compile Collaborative Report** to trigger a debate between 15 specialized AI agents who will output a formal municipal adaptation plan.
-* **Settings:** Click the gear icon to customize your user role (Citizen, Researcher, or Officer) or save your own Gemini & Firebase API keys for full AI execution.`;
+  // 1. Heatstroke vs Heat Exhaustion Symptoms
+  if (cleanQuery.includes('symptom') || cleanQuery.includes('stroke') || cleanQuery.includes('exhaustion') || cleanQuery.includes('sick') || cleanQuery.includes('first aid') || cleanQuery.includes('illness')) {
+    return `### 🚨 Heat Illness Diagnostic & First Aid Protocols
+Current Wet Bulb stress in **${city.name}** is **${wbgtRes.wbgt}°C (${wbgtRes.riskLevel} Risk)**.
+
+#### 1. Heat Exhaustion (Warning State)
+*   **Common Symptoms:** Heavy sweating, muscle cramps, cold/pale/clammy skin, rapid weak pulse, dizziness, headache, nausea.
+*   **Immediate First Aid Action:**
+    1. Move the individual to a shaded, air-conditioned space.
+    2. Loosen all tight clothing.
+    3. Apply cool, damp cloths to the neck, forehead, and underarms.
+    4. Provide cool water to sip slowly (avoid gulping).
+    5. Monitor closely; if symptoms persist or worsen beyond 30 minutes, seek emergency medical services.
+
+#### 2. Heat Stroke (Critical Medical Emergency!)
+*   **Common Symptoms:** Core body temperature $> 39.4°C$, red/hot/dry skin (sweating has ceased), rapid strong pulse, confusion, slurred speech, hallucinations, loss of consciousness.
+*   **Immediate First Aid Action:**
+    1. **Call Emergency Services immediately.**
+    2. Move the victim to a cool area.
+    3. Cool the body rapidly: douse with cool water, fan them, or place in a cool bath.
+    4. **Do NOT administer fluids** if the person is confused or semi-conscious, as it poses a severe choking hazard.`;
   }
 
-  // 2. Shelters
-  if (q.includes('shelter') || q.includes('cooling') || q.includes('center') || q.includes('refuge') || q.includes('where') || q.includes('find')) {
-    const activeShelters = city.coolingShelters.map(s => 
-      `* **${s.name}**: ${s.address} (${s.status} - Occupied: ${s.occupied}/${s.capacity}, approx ${s.distanceMeters}m away)`
-    ).join('\n');
-    return `### Cooling Shelters in ${city.name} (Local AI Fallback)
-Based on current telemetry, the following relief centers are configured in our GIS database for **${city.name}**:
-${activeShelters}
-\n**Safety Note:** Cooling shelters provide free air conditioning, drinking water, and medical kits. If you are experiencing symptoms of heat stress, please head to the nearest shelter immediately.`;
+  // 2. Specific Shelter Queries
+  if (cleanQuery.includes('shelter') || cleanQuery.includes('cooling') || cleanQuery.includes('center') || cleanQuery.includes('refuge') || cleanQuery.includes('where') || cleanQuery.includes('find')) {
+    const list = city.coolingShelters.map((s, idx) => 
+      `*   **${s.name}**
+    *   *Address:* ${s.address}
+    *   *Capacity:* ${s.occupied} / ${s.capacity} occupied (${s.status})
+    *   *Distance:* approx ${s.distanceMeters} meters away
+    *   *Emergency Contact:* ${s.contact}`
+    ).join('\n\n');
+
+    return `### 🏢 Cooling Shelter Status: ${city.name}
+We have located ${city.coolingShelters.length} cooling relief centers in the **${city.name}** database:
+
+${list}
+
+> **Safety Guidelines:** Shelters are equipped with free air conditioning, drinking water, hydration packs, and first-aid kits. If you are outdoors and feel dizzy or dehydrated, please head to the nearest center.`;
   }
 
-  // 3. Health & First Aid
-  if (q.includes('health') || q.includes('heatstroke') || q.includes('exhaustion') || q.includes('first aid') || q.includes('protect') || q.includes('illness') || q.includes('medical') || q.includes('symptom') || q.includes('sick')) {
-    return `### Heat Illness & First Aid Guide (Local AI Fallback)
-Extreme temperatures (current WBGT in ${city.name}: **${wbgtRes.wbgt}°C**, representing **${wbgtRes.riskLevel} Risk**) pose severe risks. Here is how to respond:
+  // 3. Sandbox Simulation & Policy Guides
+  if (cleanQuery.includes('use') || cleanQuery.includes('simulation') || cleanQuery.includes('sandbox') || cleanQuery.includes('how to') || cleanQuery.includes('slider') || cleanQuery.includes('mitigation') || cleanQuery.includes('policy') || cleanQuery.includes('compile') || cleanQuery.includes('run')) {
+    return `### ⚙️ How to Run Microclimate Simulations in SafeSphere
+SafeSphere features an advanced thermodynamic sandbox allowing you to test urban cooling policies:
 
-1. **Heat Exhaustion (Warning State):**
-   * *Symptoms:* Heavy sweating, weakness, cold/pale/clammy skin, fast weak pulse, nausea, dizziness.
-   * *First Aid:* Move to a cool/shaded area. Loosen clothing. Apply cool, wet cloths. Sip water. Seek medical aid if symptoms worsen.
-
-2. **Heat Stroke (Critical Emergency!):**
-   * *Symptoms:* High body temp (above 39.4°C), hot/red/dry or damp skin, rapid strong pulse, headache, dizziness, confusion, unconsciousness.
-   * *First Aid:* **Call emergency services immediately.** Move the person to a cool place. Cool the body using cold water/ice baths. Do NOT give them water to drink (choking risk if semi-conscious).
-
-3. **General Mitigation:**
-   * Limit strenuous outdoor activities during peak hours (11:00 AM - 4:00 PM).
-   * Wear lightweight, loose-fitting, light-colored clothing.`;
+1.  **Select active location:** Enter any city or village globally in the top header search bar. SafeSphere will dynamically geocode the coordinates and fetch live meteorological feeds.
+2.  **Access the Government Portal:** Navigate to the **Government Portal** tab.
+3.  **Adjust mitigation sliders:**
+    *   **Canopy Shade Trees:** Increases vegetation index (NDVI) which cools through evapotranspiration ($150/tree).
+    *   **Cool Roof Retrofits:** Raises surface albedo, reflecting solar radiation away from dark asphalt/concrete ($15/m²).
+    *   **Green Roofs:** Combats runoff and adds evaporative microclimates to tall building rooftops ($120/m²).
+    *   **Water Retention Plazas:** Creates central water bodies, fostering micro-scale evaporative cooling circulation ($200/m²).
+4.  **Analyze simulation outputs:** SafeSphere dynamically recalculates LST reductions, air temperature drops, carbon capture, and feasibility scores.
+5.  **Compile reports:** Click **Compile Adaptation Policy** to trigger a collaborative multi-agent planning report.`;
   }
 
-  // 4. LST, Albedo, NDVI & Physics
-  if (q.includes('lst') || q.includes('land surface') || q.includes('temperature') || q.includes('hotspot') || q.includes('satellite') || q.includes('albedo') || q.includes('ndvi') || q.includes('vegetation') || q.includes('physics') || q.includes('thermodynamic')) {
-    return `### Microclimate & Thermodynamic Analysis for ${city.name} (Local AI Fallback)
-Here is the thermodynamic analysis generated by our physics engine for the current conditions in **${city.name}**:
-* **Land Surface Temperature (LST):** Estimated at **${lstRes.lst}°C** (confidence range: ${lstRes.confidenceInterval[0]}°C to ${lstRes.confidenceInterval[1]}°C).
-* **Albedo:** **${city.baseParams.albedo}** (reflects ${city.baseParams.albedo * 100}% of solar energy, absorbing ${lstRes.absorbedRadiationWm2} W/m²). Low albedo causes dark materials (asphalt, concrete) to absorb heat.
-* **NDVI (Vegetation Index):** **${city.baseParams.ndvi}** (scale -1 to 1). Vegetation cools through evapotranspiration. High-vegetation areas are significantly cooler.
-* **Building Morphology:** Building Density of **${city.baseParams.buildingDensity}%** and height of **${city.baseParams.buildingHeight}m** restrict ventilation and trap radiation.
-\n**Mitigation Tip:** Increasing surface albedo (e.g. cool roof coatings) is the most cost-effective way to immediately drop LST in highly built-up areas.`;
+  // 4. LST, Albedo, NDVI & Thermodynamic Science
+  if (cleanQuery.includes('lst') || cleanQuery.includes('albedo') || cleanQuery.includes('ndvi') || cleanQuery.includes('thermodynamic') || cleanQuery.includes('physics') || cleanQuery.includes('vegetation') || cleanQuery.includes('surface') || cleanQuery.includes('radiation') || cleanQuery.includes('trapping')) {
+    return `### 🔬 Physics-Informed Thermodynamic Model Breakdown
+SafeSphere estimates surface temperature anomalies using physical equilibrium models:
+
+*   **Land Surface Temperature (LST):** Current LST in **${city.name}** is estimated at **${lstRes.lst}°C**. This is determined by balancing solar irradiance absorption against convective wind cooling and vegetative cooling.
+*   **NDVI (Normalized Difference Vegetation Index):** Currently **${city.baseParams.ndvi}** in ${city.name}. High NDVI means dense greenery, which actively dissipates heat through transpiration.
+*   **Albedo:** Currently **${city.baseParams.albedo}** in ${city.name}. It represents the fraction of solar energy reflected. Dark asphalt reflects only ~15% (absorbing ~85%), while white cool roof coatings reflect over 75% of solar energy.
+*   **Morphology trapping:** Building Density (${city.baseParams.buildingDensity}%) and Heights (${city.baseParams.buildingHeight}m) restrict the Sky View Factor (SVF), trapping longwave radiation within street canyons.`;
   }
 
-  // 5. Weather, Forecasting & Trends
-  if (q.includes('forecasting') || q.includes('weather') || q.includes('forecast') || q.includes('trend') || q.includes('wind') || q.includes('humidity') || q.includes('rain') || q.includes('climate')) {
-    return `### Meteorological Forecast & Trends (Local AI Fallback)
-Current weather readings for **${city.name}, ${city.country}**:
-* **Air Temperature:** ${city.baseParams.airTemp}°C
-* **Relative Humidity:** ${city.baseParams.relativeHumidity}%
-* **Wind Speed:** ${city.baseParams.windSpeed} m/s
-* **Solar Radiation:** ${city.baseParams.solarRad} W/m²
-* **Vulnerability Index:** ${city.vulnerabilityIndex}/100
+  // 5. Weather, Humidity, Wind & Climate
+  if (cleanQuery.includes('weather') || cleanQuery.includes('forecast') || cleanQuery.includes('humidity') || cleanQuery.includes('wind') || cleanQuery.includes('temperature') || cleanQuery.includes('trend')) {
+    return `### 🌤️ Live Climate & Meteorological Telemetry for ${city.name}
+Here is the validated weather report for **${city.name}, ${city.country}**:
 
-**Historical warming trend:** Our database shows an average Land Surface Temperature increase of **+0.25°C per year** in this region over the past decade due to urban expansion. Preparedness levels should be escalated if ambient air temperatures exceed 35°C.`;
+*   **Ambient Air Temperature:** ${city.baseParams.airTemp}°C
+*   **Relative Humidity:** ${city.baseParams.relativeHumidity}%
+*   **Wind Speed:** ${city.baseParams.windSpeed} m/s
+*   **Solar Irradiance:** ${city.baseParams.solarRad} W/m²
+*   **Demographic Vulnerability:** ${city.vulnerabilityIndex}/100 (Composite risk scale)
+
+**Historical Trends:** Over the past decade, this region has recorded an average Land Surface Temperature increase of **+0.25°C per year** in this region over the past decade due to urban expansion. Early warning dispatch is recommended if air temperatures cross 35°C.`;
   }
 
-  // 6. Government Policy & Simulation
-  if (q.includes('government') || q.includes('policy') || q.includes('adaptation') || q.includes('mitigation') || q.includes('cost') || q.includes('tree') || q.includes('roof')) {
-    return `### Resilience Planning Guidelines (Local AI Fallback)
-As the AI Climate Assistant, I recommend the following adaptation policies for **${city.name}**:
-1. **Cool Roof Mandates:** Coating 40% of the city's roof area with reflective coatings ($15/m²) would reflect substantial solar radiation and drop localized air temperatures by up to 0.6°C.
-2. **Urban Canopy Expansion:** Target planting shade trees in underserved neighborhoods ($150/tree) to increase NDVI above 0.35 and provide shading.
-3. **Emergency Smart-Grid Shading:** Scale cooling shelter capacities during peak load hours to buffer energy draw from domestic air conditioning.`;
+  // 6. Emergency dialing
+  if (cleanQuery.includes('emergency') || cleanQuery.includes('phone') || cleanQuery.includes('call') || cleanQuery.includes('contact') || cleanQuery.includes('dial')) {
+    return `### 📞 Emergency Contact Protocols: ${city.name}
+If you or someone nearby is experiencing signs of heatstroke, follow these steps immediately:
+1.  **Call local medical emergency line (911 / 112 / 102 depending on country).**
+2.  Provide the coordinates: **${city.coords.lat.toFixed(4)}, ${city.coords.lng.toFixed(4)}**.
+3.  State clearly: *"We have a heat-related medical emergency. Patient has hot, dry skin and is showing signs of confusion."*
+4.  Move the patient to the nearest cooling shelter if possible (e.g. **${city.coolingShelters[0]?.name || 'Relief Center'}**).`;
   }
 
   // 7. General Climate Response
-  return `### AI Climate Assistant Response (Local AI Fallback)
-Greetings! I am the SafeSphere AI Assistant. I can answer questions about climate adaptation, urban heat indices, and guide you on using this application.
+  return `### 💬 SafeSphere AI Climate & Resilience Assistant
+Greetings! I am the SafeSphere AI assistant. I can answer questions about climate adaptation, thermodynamics, heat illness first-aid, or guide you on how to use this app.
 
 Currently, **${city.name}** is reporting:
-* **Air Temperature:** ${city.baseParams.airTemp}°C
-* **Relative Humidity:** ${city.baseParams.relativeHumidity}%
-* **Estimated Land Surface Temperature:** ${lstRes.lst}°C
-* **WBGT Risk:** ${wbgtRes.wbgt}°C (${wbgtRes.riskLevel} Risk)
+*   **Air Temp:** ${city.baseParams.airTemp}°C
+*   **Surface LST:** ${lstRes.lst}°C
+*   **Wet Bulb stress:** ${wbgtRes.wbgt}°C (${wbgtRes.riskLevel} Risk)
 
-Please ask me about:
-1. **"How do I use this simulation?"** to learn how to test cooling policies.
-2. **"Where is the nearest cooling shelter?"** to view local safety centers.
-3. **"What is the first aid for heatstroke?"** to view medical guidelines.
-4. **"Explain the thermodynamic physics of albedo."** to understand the science.`;
+**Suggested questions to ask me:**
+1.  *“How do I use this simulation sandbox?”*
+2.  *“What is the difference between heatstroke and heat exhaustion symptoms?”*
+3.  *“Explain the thermodynamic physics of albedo and NDVI.”*
+4.  *“Show me cooling shelter details for ${city.name}.”*`;
 }

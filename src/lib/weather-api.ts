@@ -5,6 +5,7 @@
 
 export interface GeocodedLocation {
   name: string;
+  fullName: string;
   country: string;
   lat: number;
   lng: number;
@@ -35,14 +36,24 @@ export async function searchLocations(query: string): Promise<GeocodedLocation[]
       return [];
     }
 
-    return data.results.map((item: any) => ({
-      name: item.name,
-      country: item.country || item.admin1 || 'Unknown',
-      lat: item.latitude,
-      lng: item.longitude,
-      population: item.population || 0,
-      elevation: item.elevation || 0
-    }));
+    return data.results.map((item: any) => {
+      const adminDetails = [
+        item.admin3, // Taluka / Subdistrict
+        item.admin2, // District / County
+        item.admin1, // State / Region
+        item.country
+      ].filter(Boolean).join(', ');
+
+      return {
+        name: item.name,
+        fullName: adminDetails ? `${item.name} (${adminDetails})` : item.name,
+        country: item.country || 'Unknown',
+        lat: item.latitude,
+        lng: item.longitude,
+        population: item.population || 0,
+        elevation: item.elevation || 0
+      };
+    });
   } catch (e) {
     console.error('Geocoding API failed, falling back to local matches:', e);
     return [];

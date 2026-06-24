@@ -155,7 +155,7 @@ function MainLayout({ children }: { children: React.ReactNode }) {
 
               {/* Search Results Dropdown Overlay */}
               {showSearchDropdown && searchQuery.trim().length > 0 && (
-                <div className="absolute right-0 mt-1.5 w-64 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg shadow-xl z-50 py-1 text-xs max-h-60 overflow-y-auto">
+                <div className="absolute right-0 mt-1.5 w-80 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg shadow-xl z-50 py-1 text-xs max-h-60 overflow-y-auto">
                   {searchLoading && searchResults.length === 0 ? (
                     <div className="px-3 py-2 text-zinc-400 flex items-center gap-2">
                       <Loader2 className="w-3.5 h-3.5 animate-spin" /> Searching...
@@ -170,8 +170,8 @@ function MainLayout({ children }: { children: React.ReactNode }) {
                         onClick={() => handleSelectLocation(loc)}
                         className="w-full text-left px-3 py-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-800 dark:text-zinc-200 flex flex-col gap-0.5 border-b border-zinc-100 dark:border-zinc-800 last:border-b-0"
                       >
-                        <span className="font-medium">{loc.name}</span>
-                        <span className="text-[10px] text-zinc-400">{loc.country}</span>
+                        <span className="font-medium text-zinc-900 dark:text-zinc-100">{loc.name}</span>
+                        <span className="text-[10px] text-zinc-400 leading-normal">{loc.fullName}</span>
                       </button>
                     ))
                   )}
