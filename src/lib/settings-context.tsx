@@ -67,7 +67,18 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     const savedCityId = localStorage.getItem('safesphere_city_id');
     if (savedCityId) {
       const city = CITIES_DATA.find(c => c.id === savedCityId);
-      if (city) setCurrentCityState(city);
+      if (city) {
+        setCurrentCityState(city);
+      } else {
+        const savedCustomCity = localStorage.getItem('safesphere_custom_city');
+        if (savedCustomCity) {
+          try {
+            setCurrentCityState(JSON.parse(savedCustomCity));
+          } catch (e) {
+            console.error('Error parsing custom city', e);
+          }
+        }
+      }
     }
 
     const savedGeminiKey = localStorage.getItem('safesphere_gemini_key');
@@ -101,6 +112,12 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
   const setCurrentCity = (city: CityData) => {
     setCurrentCityState(city);
     localStorage.setItem('safesphere_city_id', city.id);
+    const isPreconfigured = CITIES_DATA.some(c => c.id === city.id);
+    if (!isPreconfigured) {
+      localStorage.setItem('safesphere_custom_city', JSON.stringify(city));
+    } else {
+      localStorage.removeItem('safesphere_custom_city');
+    }
   };
 
   const setGeminiApiKey = (key: string) => {

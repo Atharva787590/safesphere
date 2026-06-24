@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import { useSettings } from '../../lib/settings-context';
 import { calculateWBGT } from '../../lib/physics-engine';
 import { CoolingShelter } from '../../lib/demo-data';
-import { querySingleAgent } from '../../lib/agents-orchestrator';
+import { querySingleAgent, queryUniversalAI } from '../../lib/agents-orchestrator';
 import GisMap from '../../components/gis-map';
 import { 
   ShieldAlert, 
@@ -26,7 +26,7 @@ export default function CitizenPortal() {
   const [messages, setMessages] = useState<{ sender: 'user' | 'agent'; text: string; time: string }[]>([
     {
       sender: 'agent',
-      text: `Hello! I am the Citizen Support Agent. Currently, I am analyzing local microclimatic conditions in ${currentCity.name}. Let me know if you need nearest cooling shelter directories, heat safety guidelines, or translation support.`,
+      text: `Hello! I am the SafeSphere AI Climate Assistant. Currently, I am analyzing local microclimatic conditions in ${currentCity.name}. Let me know if you need nearest cooling shelter directories, heat safety guidelines, details about how to run simulations, or have any general climate questions!`,
       time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     }
   ]);
@@ -56,8 +56,8 @@ export default function CitizenPortal() {
     setIsTyping(true);
 
     try {
-      // Query Citizen Support Agent
-      const response = await querySingleAgent('citizen-support', query, currentCity.baseParams, geminiApiKey);
+      // Query Universal AI Chatbot
+      const response = await queryUniversalAI(query, currentCity, geminiApiKey);
       
       setMessages(prev => [...prev, {
         sender: 'agent',
@@ -76,10 +76,10 @@ export default function CitizenPortal() {
   };
 
   const quickQuestions = [
+    'How do I use this simulation?',
     'Nearest cooling shelter details',
     'Heat stroke vs heat exhaustion symptoms',
-    'Hydration rules for children and elderly',
-    'Safety tips in Spanish (Consejos de seguridad)'
+    'Explain the thermodynamic physics of albedo'
   ];
 
   return (

@@ -516,3 +516,208 @@ export const MOCK_DISASTER_REPORTS = [
     activeInterventions: ['Public Parks Kept Open 24h', 'Elderly Well-being Phone Inquiries']
   }
 ];
+
+export function generateDynamicCityData(
+  name: string,
+  country: string,
+  lat: number,
+  lng: number,
+  population: number = 50000,
+  elevation: number = 50,
+  liveWeather?: { airTemp: number; relativeHumidity: number; windSpeed: number; solarRad: number }
+): CityData {
+  // Let's decide base params based on population and elevation, or liveWeather if available.
+  const temp = liveWeather ? liveWeather.airTemp : 30.0;
+  const rh = liveWeather ? liveWeather.relativeHumidity : 50;
+  const wind = liveWeather ? liveWeather.windSpeed : 2.0;
+  const solar = liveWeather ? liveWeather.solarRad : 700;
+
+  // Estimate urban parameters based on population
+  // If population is high, building density is high, albedo is low, ndvi is low
+  let buildingDensity = 20; // rural fallback
+  let buildingHeight = 6;
+  let ndvi = 0.5;
+  let albedo = 0.25;
+
+  if (population > 1000000) {
+    buildingDensity = 80;
+    buildingHeight = 45;
+    ndvi = 0.12;
+    albedo = 0.16;
+  } else if (population > 250000) {
+    buildingDensity = 60;
+    buildingHeight = 25;
+    ndvi = 0.22;
+    albedo = 0.18;
+  } else if (population > 50000) {
+    buildingDensity = 40;
+    buildingHeight = 12;
+    ndvi = 0.35;
+    albedo = 0.22;
+  }
+
+  // Jitter generator for shelters and sensors
+  const getJitter = () => (Math.random() - 0.5) * 0.03; // ~3km max spread
+
+  const coolingShelters: CoolingShelter[] = [
+    {
+      id: `shelter-${Date.now()}-1`,
+      name: `${name} Public Relief Center`,
+      address: `Near ${name} Transit Depot`,
+      lat: lat + getJitter(),
+      lng: lng + getJitter(),
+      capacity: Math.max(100, Math.round(population * 0.001)),
+      occupied: Math.max(20, Math.round(population * 0.0006)),
+      status: 'Open',
+      distanceMeters: Math.round(500 + Math.random() * 2000),
+      contact: `+1 (555) 999-0111`
+    },
+    {
+      id: `shelter-${Date.now()}-2`,
+      name: `${name} Community Shade Hub`,
+      address: `${name} Central Park North`,
+      lat: lat + getJitter(),
+      lng: lng + getJitter(),
+      capacity: Math.max(80, Math.round(population * 0.0008)),
+      occupied: Math.max(10, Math.round(population * 0.0004)),
+      status: 'Open',
+      distanceMeters: Math.round(800 + Math.random() * 2000),
+      contact: `+1 (555) 999-0222`
+    }
+  ];
+
+  // Add a 3rd shelter for larger cities
+  if (population > 200000) {
+    coolingShelters.push({
+      id: `shelter-${Date.now()}-3`,
+      name: `${name} Municipal Arena (Cool Zone)`,
+      address: `100 Civic Center Blvd, ${name}`,
+      lat: lat + getJitter(),
+      lng: lng + getJitter(),
+      capacity: Math.max(300, Math.round(population * 0.002)),
+      occupied: Math.max(280, Math.round(population * 0.0019)),
+      status: 'Full',
+      distanceMeters: Math.round(1500 + Math.random() * 2000),
+      contact: `+1 (555) 999-0333`
+    });
+  }
+
+  // IoT Sensors
+  const iotSensors: IoTSensor[] = [
+    {
+      id: `sensor-${Date.now()}-temp`,
+      name: `${name} Grid Temperature Node`,
+      type: 'Temperature',
+      value: Math.round((temp + (Math.random() - 0.5) * 2) * 10) / 10,
+      unit: '°C',
+      status: 'Active',
+      lastUpdated: 'Just now',
+      history: Array.from({ length: 6 }, (_, i) => Math.round((temp - 2 + i * 0.4 + (Math.random() - 0.5)) * 10) / 10)
+    },
+    {
+      id: `sensor-${Date.now()}-humidity`,
+      name: `${name} Sector Humidity Loop`,
+      type: 'Humidity',
+      value: Math.round(Math.min(95, Math.max(5, rh + (Math.random() - 0.5) * 10))),
+      unit: '%',
+      status: 'Active',
+      lastUpdated: 'Just now',
+      history: Array.from({ length: 6 }, () => Math.round(Math.min(95, Math.max(5, rh + (Math.random() - 0.5) * 10))))
+    },
+    {
+      id: `sensor-${Date.now()}-wind`,
+      name: `${name} Wind Speed Gauge`,
+      type: 'Wind',
+      value: Math.round(Math.max(0.1, wind + (Math.random() - 0.5) * 1) * 10) / 10,
+      unit: 'm/s',
+      status: 'Active',
+      lastUpdated: '5 min ago',
+      history: Array.from({ length: 6 }, () => Math.round(Math.max(0.1, wind + (Math.random() - 0.5) * 1) * 10) / 10)
+    },
+    {
+      id: `sensor-${Date.now()}-aqi`,
+      name: `${name} AQI Micro-station`,
+      type: 'AQI',
+      value: population > 1000000 ? Math.round(120 + Math.random() * 60) : Math.round(30 + Math.random() * 50),
+      unit: 'US AQI',
+      status: 'Active',
+      lastUpdated: '3 min ago',
+      history: Array.from({ length: 6 }, () => Math.round(population > 1000000 ? 100 + Math.random() * 80 : 25 + Math.random() * 60))
+    }
+  ];
+
+  // Set sensor warning if temp or AQI is too high
+  if (iotSensors[0].value > 40) {
+    iotSensors[0].status = 'Warning';
+  }
+  if (iotSensors[3].value > 100) {
+    iotSensors[3].status = 'Warning';
+  } else if (iotSensors[3].value > 150) {
+    iotSensors[3].status = 'Failure';
+  }
+
+  // Generate historical trends showing warming over the years
+  const historicalTrends = Array.from({ length: 10 }, (_, idx) => {
+    const year = 2017 + idx;
+    const baseLst = temp + (buildingDensity / 100) * 10 - ndvi * 8;
+    const warmingTrend = idx * 0.25; // 0.25 degrees per year warming
+    return {
+      year,
+      lst: Math.round((baseLst - 2.5 + warmingTrend + (Math.random() - 0.5) * 0.8) * 10) / 10,
+      airTemp: Math.round((temp - 2 + warmingTrend + (Math.random() - 0.5) * 0.5) * 10) / 10
+    };
+  });
+
+  // Calculate high heat vulnerability dynamically
+  let vulnerabilityIndex = Math.round(
+    (buildingDensity * 0.4) + 
+    ((1 - ndvi) * 30) + 
+    (population > 500000 ? 20 : population > 50000 ? 10 : 0) +
+    (temp > 35 ? 10 : 0)
+  );
+  vulnerabilityIndex = Math.min(95, Math.max(10, vulnerabilityIndex));
+
+  // Determine disaster alert
+  let disasterAlert: CityData['disasterAlert'] = {
+    type: 'None',
+    severity: 'None',
+    message: 'Normal conditions. Low thermal stress indices.'
+  };
+
+  if (temp > 40) {
+    disasterAlert = {
+      type: 'Heatwave',
+      severity: 'Critical',
+      message: `Extreme Thermal Warning: Temperatures are projected at ${temp}°C. Suspend outdoor activities.`
+    };
+  } else if (temp > 33) {
+    disasterAlert = {
+      type: 'Heatwave',
+      severity: 'Warning',
+      message: `Heat stress advisory: High temperature of ${temp}°C detected. Stay hydrated.`
+    };
+  }
+
+  return {
+    id: name.toLowerCase().replace(/[^a-z0-9]/g, '-'),
+    name,
+    country,
+    coords: { lat, lng },
+    baseParams: {
+      airTemp: temp,
+      albedo,
+      ndvi,
+      solarRad: solar,
+      windSpeed: wind,
+      relativeHumidity: rh,
+      buildingDensity,
+      buildingHeight
+    },
+    population,
+    vulnerabilityIndex,
+    disasterAlert,
+    coolingShelters,
+    iotSensors,
+    historicalTrends
+  };
+}
