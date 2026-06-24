@@ -1,9 +1,9 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { CityData, CoolingShelter } from '../lib/demo-data';
 import { estimateLST } from '../lib/physics-engine';
-import { Map, Layers, Compass, Eye, ShieldAlert, Sparkles } from 'lucide-react';
+import { Map, Eye, Compass, Info } from 'lucide-react';
 
 interface GisMapProps {
   city: CityData;
@@ -23,101 +23,265 @@ export default function GisMap({
   onSelectShelter,
   coolingInterventions 
 }: GisMapProps) {
-  const [activeLayer, setActiveLayer] = useState<'thermal' | 'ndvi' | 'satellite'>('thermal');
-  const [hoveredNode, setHoveredNode] = useState<{ x: number; y: number; lst: number; ndvi: number; density: number } | null>(null);
+  const [activeLayer, setActiveLayer] = useState<'satellite' | 'terrain' | 'streets'>('satellite');
+  const [leafletLoaded, setLeafletLoaded] = useState(false);
+  const mapContainerRef = useRef<HTMLDivElement>(null);
+  const mapRef = useRef<any>(null);
+  const markerGroupRef = useRef<any>(null);
+  const heatDomeRef = useRef<any>(null);
   
   // Calculate simulated parameters
   const trees = coolingInterventions?.treePlantedCount || 0;
   const coolRoofs = coolingInterventions?.coolRoofAreaM2 || 0;
   const water = coolingInterventions?.waterBodyAreaM2 || 0;
 
-  // Generate 12x12 grid representing spatial segments of the city
-  const gridCells = [];
-  const gridSize = 8;
-  
-  for (let y = 0; y < gridSize; y++) {
-    for (let x = 0; x < gridSize; x++) {
-      // Calculate local variations based on x, y coordinates
-      // Central areas have higher density, outskirts have higher vegetation
-      const centerDist = Math.sqrt(Math.pow(x - (gridSize - 1) / 2, 2) + Math.pow(y - (gridSize - 1) / 2, 2));
-      const normalizedCenterDist = centerDist / (Math.sqrt(2) * (gridSize - 1) / 2);
+  const currentLst = estimateLST({
+    ...city.baseParams,
+    ndvi: Math.min(city.baseParams.ndvi + (trees * 25 / 1000000) * 0.4, 0.85),
+    albedo: Math.min(city.baseParams.albedo + (coolRoofs / 1000000) * 0.6, 0.6)
+  }).lst;
 
-      let localDensity = Math.round(city.baseParams.buildingDensity * (1.1 - normalizedCenterDist * 0.3));
-      localDensity = Math.min(Math.max(localDensity - (water > 0 ? 5 : 0), 10), 95);
+  // Load Leaflet dynamically via CDN to ensure SSR compatibility
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
 
-      let localNdvi = city.baseParams.ndvi * (normalizedCenterDist * 0.7 + 0.3);
-      if (trees > 0) localNdvi += (trees / 5000) * 0.15;
-      localNdvi = Math.min(Math.max(localNdvi, 0.05), 0.85);
-
-      let localAlbedo = city.baseParams.albedo;
-      if (coolRoofs > 0) localAlbedo = Math.min(localAlbedo + (coolRoofs / 100000) * 0.25, 0.65);
-
-      const localParams = {
-        ...city.baseParams,
-        buildingDensity: localDensity,
-        ndvi: localNdvi,
-        albedo: localAlbedo
-      };
-
-      const lstResult = estimateLST(localParams);
-      gridCells.push({ x, y, lst: lstResult.lst, ndvi: localNdvi, density: localDensity });
+    // Check if leaflet is already loaded
+    if ((window as any).L) {
+      setLeafletLoaded(true);
+      return;
     }
-  }
 
-  // Determine heat cell color mapping
-  const getCellColor = (lst: number, ndvi: number, density: number) => {
-    if (activeLayer === 'thermal') {
-      // Scale from green/blue to deep red
-      if (lst > 45) return 'rgba(239, 68, 68, 0.75)'; // deep red
-      if (lst > 40) return 'rgba(249, 115, 22, 0.7)'; // orange
-      if (lst > 35) return 'rgba(245, 158, 11, 0.65)'; // amber
-      if (lst > 30) return 'rgba(234, 179, 8, 0.55)'; // yellow
-      return 'rgba(16, 185, 129, 0.45)'; // green
-    } else if (activeLayer === 'ndvi') {
-      // Scale from light brown to deep green
-      if (ndvi > 0.6) return 'rgba(4, 120, 87, 0.8)'; // forest green
-      if (ndvi > 0.4) return 'rgba(16, 185, 129, 0.65)'; // emerald
-      if (ndvi > 0.2) return 'rgba(110, 231, 183, 0.5)'; // mint
-      return 'rgba(217, 119, 6, 0.4)'; // dry grass brown
+    // 1. Add Leaflet CSS
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+    document.head.appendChild(link);
+
+    // 2. Add Leaflet JS
+    const script = document.createElement('script');
+    script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+    script.async = true;
+    script.onload = () => {
+      setLeafletLoaded(true);
+    };
+    document.head.appendChild(script);
+
+    return () => {
+      // Clean up tags if needed
+      try {
+        document.head.removeChild(link);
+        document.head.removeChild(script);
+      } catch (e) {}
+    };
+  }, []);
+
+  // Initialize and update Map instance
+  useEffect(() => {
+    if (!leafletLoaded || !mapContainerRef.current) return;
+    const L = (window as any).L;
+    if (!L) return;
+
+    // Destroy map if it exists
+    if (mapRef.current) {
+      mapRef.current.remove();
+      mapRef.current = null;
+    }
+
+    // Initialize Map
+    const map = L.map(mapContainerRef.current, {
+      center: [city.coords.lat, city.coords.lng],
+      zoom: 13,
+      zoomControl: false,
+      attributionControl: false
+    });
+    mapRef.current = map;
+
+    // Add clean zoom control
+    L.control.zoom({ position: 'bottomright' }).addTo(map);
+
+    // Initialize markers group
+    markerGroupRef.current = L.layerGroup().addTo(map);
+
+    // Add Heat Bubble overlay circle
+    // Color and opacity scale with surface temperature LST
+    const getHeatColor = (temp: number) => {
+      if (temp > 44) return '#ef4444'; // deep red
+      if (temp > 39) return '#f97316'; // orange
+      if (temp > 34) return '#f59e0b'; // amber
+      return '#10b981'; // emerald green
+    };
+
+    const heatColor = getHeatColor(currentLst);
+    const heatOpacity = Math.min(Math.max((currentLst - 25) / 25, 0.15), 0.7);
+
+    heatDomeRef.current = L.circle([city.coords.lat, city.coords.lng], {
+      color: heatColor,
+      fillColor: heatColor,
+      fillOpacity: heatOpacity,
+      radius: 1800, // 1.8km radius representing Urban Heat Island core
+      weight: 1.5,
+      dashArray: '4, 4'
+    }).addTo(map);
+
+    // Bind tooltip to heat dome
+    heatDomeRef.current.bindTooltip(
+      `Urban Heat Island Core (Simulated LST: ${currentLst}°C)`,
+      { permanent: false, direction: 'top' }
+    );
+
+    return () => {
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
+      }
+    };
+  }, [leafletLoaded, city.id]);
+
+  // Update Base Layer Tile when activeLayer state changes
+  useEffect(() => {
+    if (!mapRef.current) return;
+    const L = (window as any).L;
+    if (!L) return;
+
+    // Find and remove existing tile layer
+    mapRef.current.eachLayer((layer: any) => {
+      if (layer instanceof L.TileLayer) {
+        mapRef.current.removeLayer(layer);
+      }
+    });
+
+    let tileUrl = '';
+    let attribution = '';
+
+    if (activeLayer === 'satellite') {
+      // Esri World Imagery Satellite Tiles
+      tileUrl = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
+      attribution = 'Tiles &copy; Esri';
+    } else if (activeLayer === 'terrain') {
+      // OpenTopoMap Terrain Relief Tiles
+      tileUrl = 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png';
+      attribution = '&copy; OpenTopoMap';
     } else {
-      // Satellite layout colors (urban concrete grid view)
-      if (density > 75) return 'rgba(100, 116, 139, 0.75)'; // dark concrete slate
-      if (density > 50) return 'rgba(148, 163, 184, 0.65)'; // medium slate
-      return 'rgba(71, 85, 105, 0.55)'; // light slate
+      // CartoDB Voyager Streets Tiles
+      tileUrl = 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{y}/{x}{r}.png';
+      attribution = '&copy; CartoDB';
     }
-  };
+
+    L.tileLayer(tileUrl, {
+      maxZoom: 18,
+      attribution
+    }).addTo(mapRef.current);
+
+  }, [leafletLoaded, activeLayer, city.id]);
+
+  // Update Markers and Popups when shelters, city, or selections change
+  useEffect(() => {
+    if (!leafletLoaded || !mapRef.current || !markerGroupRef.current) return;
+    const L = (window as any).L;
+    if (!L) return;
+
+    // Clear previous markers
+    markerGroupRef.current.clearLayers();
+
+    // Map markers
+    city.coolingShelters.forEach((shelter) => {
+      const isSelected = selectedShelter?.id === shelter.id;
+
+      // Custom marker icon using simple divIcon for high responsiveness
+      const icon = L.divIcon({
+        className: 'custom-leaflet-marker',
+        html: `<div style="
+          width: 28px;
+          height: 28px;
+          border-radius: 50%;
+          background-color: ${isSelected ? '#06b6d4' : '#1e293b'};
+          border: 2px solid ${isSelected ? '#ffffff' : '#06b6d4'};
+          box-shadow: 0 0 10px rgba(6, 182, 212, 0.6);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: ${isSelected ? '#ffffff' : '#06b6d4'};
+          transition: all 0.2s ease-in-out;
+          transform: ${isSelected ? 'scale(1.2)' : 'scale(1)'};
+        ">
+          <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m12 19-7-7 7-7"/><path d="M19 12H5"/></svg>
+        </div>`,
+        iconSize: [28, 28],
+        iconAnchor: [14, 14]
+      });
+
+      const marker = L.marker([shelter.lat, shelter.lng], { icon })
+        .addTo(markerGroupRef.current);
+
+      // Popup content
+      const popupHtml = `
+        <div style="font-family: var(--font-sans); padding: 2px; min-width: 140px; color: #1e293b;">
+          <h4 style="margin: 0 0 4px 0; font-weight: bold; font-size: 11px;">${shelter.name}</h4>
+          <p style="margin: 0 0 6px 0; font-size: 9px; color: #64748b;">${shelter.address}</p>
+          <div style="display: flex; justify-between; font-size: 9px; font-weight: 600; margin-bottom: 2px;">
+            <span>Occupancy:</span>
+            <span style="color: ${shelter.status === 'Full' ? '#ef4444' : '#06b6d4'}; margin-left: 4px;">${shelter.occupied} / ${shelter.capacity}</span>
+          </div>
+          <div style="font-size: 9px; font-weight: 600;">
+            <span>Phone:</span> <span style="font-weight: 500;">${shelter.contact}</span>
+          </div>
+        </div>
+      `;
+
+      marker.bindPopup(popupHtml, { closeButton: false });
+
+      marker.on('click', () => {
+        onSelectShelter?.(shelter);
+        marker.openPopup();
+      });
+
+      // Keep popup open if selected
+      if (isSelected) {
+        setTimeout(() => marker.openPopup(), 100);
+      }
+    });
+
+  }, [leafletLoaded, city.coolingShelters, selectedShelter, city.id]);
+
+  // Update Heat Bubble dynamically when simulation values change (LST updates)
+  useEffect(() => {
+    if (!leafletLoaded || !heatDomeRef.current) return;
+    const L = (window as any).L;
+    if (!L) return;
+
+    const getHeatColor = (temp: number) => {
+      if (temp > 44) return '#ef4444'; // deep red
+      if (temp > 39) return '#f97316'; // orange
+      if (temp > 34) return '#f59e0b'; // amber
+      return '#10b981'; // emerald green
+    };
+
+    const heatColor = getHeatColor(currentLst);
+    const heatOpacity = Math.min(Math.max((currentLst - 25) / 25, 0.15), 0.7);
+
+    // Update style dynamically without re-initializing
+    heatDomeRef.current.setStyle({
+      color: heatColor,
+      fillColor: heatColor,
+      fillOpacity: heatOpacity
+    });
+
+    // Update tooltip content
+    heatDomeRef.current.setTooltipContent(`Urban Heat Island Core (Simulated LST: ${currentLst}°C)`);
+
+  }, [leafletLoaded, currentLst]);
 
   return (
     <div className="flex flex-col gap-4 h-full">
-      {/* Map Control bar */}
+      {/* Map Control Bar */}
       <div className="flex items-center justify-between bg-slate-900/60 border border-slate-800/80 rounded-xl px-4 py-2.5">
         <div className="flex items-center gap-2">
           <Map className="w-4 h-4 text-emerald-400" />
-          <span className="text-xs font-semibold text-slate-300">Geospatial Overlay</span>
+          <span className="text-xs font-semibold text-slate-300">Live Satellite GIS Viewer</span>
         </div>
         
-        {/* Layers toggle */}
+        {/* Layer Toggles */}
         <div className="flex items-center gap-1.5 bg-slate-950/60 p-0.5 rounded-lg border border-slate-800">
-          <button
-            onClick={() => setActiveLayer('thermal')}
-            className={`px-2.5 py-1 rounded-md text-[10px] font-semibold transition-all ${
-              activeLayer === 'thermal'
-                ? 'bg-emerald-500 text-white'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            Thermal Heatmap
-          </button>
-          <button
-            onClick={() => setActiveLayer('ndvi')}
-            className={`px-2.5 py-1 rounded-md text-[10px] font-semibold transition-all ${
-              activeLayer === 'ndvi'
-                ? 'bg-emerald-500 text-white'
-                : 'text-slate-400 hover:text-slate-200'
-            }`}
-          >
-            NDVI (Greenery)
-          </button>
           <button
             onClick={() => setActiveLayer('satellite')}
             className={`px-2.5 py-1 rounded-md text-[10px] font-semibold transition-all ${
@@ -126,129 +290,52 @@ export default function GisMap({
                 : 'text-slate-400 hover:text-slate-200'
             }`}
           >
-            Urban density
+            Satellite View
+          </button>
+          <button
+            onClick={() => setActiveLayer('terrain')}
+            className={`px-2.5 py-1 rounded-md text-[10px] font-semibold transition-all ${
+              activeLayer === 'terrain'
+                ? 'bg-emerald-500 text-white'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            Terrain View
+          </button>
+          <button
+            onClick={() => setActiveLayer('streets')}
+            className={`px-2.5 py-1 rounded-md text-[10px] font-semibold transition-all ${
+              activeLayer === 'streets'
+                ? 'bg-emerald-500 text-white'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            Street Map
           </button>
         </div>
       </div>
 
-      {/* Map Grid Canvas */}
-      <div className="relative flex-1 min-h-[350px] bg-slate-950 rounded-xl border border-slate-800/80 overflow-hidden flex items-center justify-center p-4">
-        {/* Water canal decorative lines */}
-        <div className="absolute inset-x-0 top-1/2 h-8 bg-blue-950/20 border-y border-blue-900/10 pointer-events-none flex items-center pl-6">
-          <span className="text-[9px] text-blue-500/30 uppercase tracking-widest font-semibold">Cynthia River Channel</span>
-        </div>
-
-        {/* Spatial Grid representation */}
-        <div className="grid grid-cols-8 gap-1.5 w-full max-w-[400px] aspect-square relative z-10">
-          {gridCells.map((cell, idx) => (
-            <div
-              key={idx}
-              className="rounded transition-all cursor-pointer relative group border border-slate-900/10"
-              style={{ backgroundColor: getCellColor(cell.lst, cell.ndvi, cell.density) }}
-              onMouseEnter={() => setHoveredNode(cell)}
-              onMouseLeave={() => setHoveredNode(null)}
-            >
-              {/* Highlight selector */}
-              <div className="absolute inset-0 border border-white/0 group-hover:border-white/50 rounded transition-all" />
-            </div>
-          ))}
-
-          {/* Shelter Pins Overlays */}
-          {city.coolingShelters.map((shelter) => {
-            // Map lat/lng coordinates to our grid roughly
-            // Lat ranges 33.39 to 33.46 -> maps to grid indices
-            const latFraction = (shelter.lat - city.coords.lat + 0.05) / 0.1;
-            const lngFraction = (shelter.lng - city.coords.lng + 0.05) / 0.1;
-            
-            const gridX = Math.min(Math.max(Math.floor(lngFraction * gridSize), 1), gridSize - 2);
-            const gridY = Math.min(Math.max(Math.floor(latFraction * gridSize), 1), gridSize - 2);
-
-            const isSelected = selectedShelter?.id === shelter.id;
-
-            return (
-              <div
-                key={shelter.id}
-                onClick={() => onSelectShelter?.(shelter)}
-                className="absolute z-20 transition-all cursor-pointer -translate-x-1/2 -translate-y-1/2"
-                style={{
-                  left: `${((gridX + 0.5) / gridSize) * 100}%`,
-                  top: `${((gridY + 0.5) / gridSize) * 100}%`
-                }}
-              >
-                <div className={`p-1 rounded-full border shadow-lg transition-all flex items-center justify-center ${
-                  isSelected 
-                    ? 'bg-cyan-500 text-white scale-125 border-white ring-4 ring-cyan-500/25' 
-                    : 'bg-[#0f172a] text-cyan-400 border-cyan-500 hover:scale-115'
-                }`}>
-                  <Compass className="w-3.5 h-3.5" />
-                </div>
-                {/* Shelter Tag */}
-                <div className="absolute top-6 left-1/2 -translate-x-1/2 bg-slate-900/90 border border-slate-700/80 px-1.5 py-0.5 rounded text-[8px] font-bold text-slate-200 whitespace-nowrap opacity-0 hover:opacity-100 transition-opacity">
-                  {shelter.name}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        {/* Floating HUD info */}
-        {hoveredNode && (
-          <div className="absolute bottom-4 left-4 z-30 p-3 rounded-lg bg-slate-900/90 border border-slate-800 text-xs flex flex-col gap-1 backdrop-blur-md pointer-events-none animate-in fade-in slide-in-from-bottom-2 duration-100 max-w-[200px]">
-            <div className="flex justify-between items-center border-b border-slate-800 pb-1">
-              <span className="font-bold text-slate-300">Sector [{hoveredNode.x}, {hoveredNode.y}]</span>
-              <Eye className="w-3 h-3 text-cyan-400" />
-            </div>
-            <p className="flex justify-between gap-4 text-slate-400">Surface LST: <span className="font-bold text-rose-400">{hoveredNode.lst}°C</span></p>
-            <p className="flex justify-between gap-4 text-slate-400">Greenery Index: <span className="font-bold text-emerald-400">{Math.round(hoveredNode.ndvi * 100)}%</span></p>
-            <p className="flex justify-between gap-4 text-slate-400">Bldg Density: <span className="font-bold text-slate-300">{hoveredNode.density}%</span></p>
+      {/* Map Element */}
+      <div className="relative flex-1 min-h-[350px] bg-slate-950 rounded-xl border border-slate-800/80 overflow-hidden">
+        {!leafletLoaded && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center text-xs text-slate-500 gap-2.5 z-30 bg-[#090d16]">
+            <div className="w-6 h-6 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin" />
+            Loading satellite imagery and geospatial map controls...
           </div>
         )}
+        <div ref={mapContainerRef} className="w-full h-full z-10" />
 
-        {/* Legend */}
-        <div className="absolute right-4 bottom-4 z-20 p-2 rounded-lg bg-slate-900/80 border border-slate-800/80 text-[9px] flex flex-col gap-1.5 backdrop-blur-md">
-          <span className="font-bold text-slate-400 uppercase tracking-wider">Legend</span>
-          {activeLayer === 'thermal' && (
-            <div className="flex flex-col gap-1">
-              <div className="flex items-center gap-1.5 text-slate-300">
-                <div className="w-2.5 h-2.5 rounded bg-rose-500" /> Critical (&gt;45°C)
-              </div>
-              <div className="flex items-center gap-1.5 text-slate-300">
-                <div className="w-2.5 h-2.5 rounded bg-orange-500" /> High (40°C - 45°C)
-              </div>
-              <div className="flex items-center gap-1.5 text-slate-300">
-                <div className="w-2.5 h-2.5 rounded bg-amber-500" /> Moderate (35°C - 40°C)
-              </div>
-              <div className="flex items-center gap-1.5 text-slate-300">
-                <div className="w-2.5 h-2.5 rounded bg-emerald-500" /> Stable (&lt;35°C)
-              </div>
-            </div>
-          )}
-          {activeLayer === 'ndvi' && (
-            <div className="flex flex-col gap-1">
-              <div className="flex items-center gap-1.5 text-slate-300">
-                <div className="w-2.5 h-2.5 rounded bg-emerald-700" /> Dense Canopy
-              </div>
-              <div className="flex items-center gap-1.5 text-slate-300">
-                <div className="w-2.5 h-2.5 rounded bg-emerald-500" /> Grass / Shrubs
-              </div>
-              <div className="flex items-center gap-1.5 text-slate-300">
-                <div className="w-2.5 h-2.5 rounded bg-amber-600" /> Sparse Cover
-              </div>
-            </div>
-          )}
-          {activeLayer === 'satellite' && (
-            <div className="flex flex-col gap-1">
-              <div className="flex items-center gap-1.5 text-slate-300">
-                <div className="w-2.5 h-2.5 rounded bg-slate-500" /> High Density
-              </div>
-              <div className="flex items-center gap-1.5 text-slate-300">
-                <div className="w-2.5 h-2.5 rounded bg-slate-600" /> Medium Density
-              </div>
-              <div className="flex items-center gap-1.5 text-slate-300">
-                <div className="w-2.5 h-2.5 rounded bg-slate-700" /> Low Density
-              </div>
-            </div>
-          )}
+        {/* HUD Info */}
+        <div className="absolute bottom-4 left-4 z-20 p-3 rounded-lg bg-slate-900/90 border border-slate-850 text-xs flex flex-col gap-1 backdrop-blur-md pointer-events-none max-w-[220px]">
+          <div className="flex justify-between items-center border-b border-slate-800 pb-1 gap-4">
+            <span className="font-bold text-slate-300">Resilience HUD</span>
+            <Eye className="w-3.5 h-3.5 text-cyan-400 animate-pulse" />
+          </div>
+          <p className="flex justify-between gap-4 text-slate-400 mt-0.5">UHI Core: <span className="font-bold text-rose-400">{currentLst}°C</span></p>
+          <p className="flex justify-between gap-4 text-slate-400">Target Area: <span className="font-bold text-slate-200">${city.name} Center</span></p>
+          <div className="flex items-center gap-1 text-[9px] text-slate-500 mt-1 border-t border-slate-850 pt-1">
+            <Info className="w-3 h-3 text-cyan-400" /> Click markers to inspect shelter capacities.
+          </div>
         </div>
       </div>
     </div>
